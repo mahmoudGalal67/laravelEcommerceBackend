@@ -13,16 +13,21 @@ return new class extends Migration
     {
         Schema::create('orders', function (Blueprint $table) {
             $table->id();
-            $table->string('order_number')->unique();
+            $table->text('payment_intent_id')->nullable();
             $table->foreignId('user_id')->constrained()->onDelete('cascade');
-            $table->foreignId('seller_id')->nullable()->constrained('sellers')->nullOnDelete(); // optional aggregated seller (for single-seller orders)
-            $table->foreignId('billing_address_id')->constrained('addresses')->onDelete('restrict');
-            $table->foreignId('shipping_address_id')->constrained('addresses')->onDelete('restrict');
+            $table->foreignId('billing_address_id')->nullable()->constrained('addresses')->onDelete('restrict');
+            $table->text('name')->nullable();
+            $table->text('email')->nullable();
+            $table->text('phone');
+            $table->text('adress');
+            $table->text('city');
+            $table->text('shipping_address_id')->nullable()->constrained('addresses')->onDelete('restrict');
             $table->decimal('subtotal', 12, 2);
             $table->decimal('shipping', 12, 2)->default(0);
             $table->decimal('tax', 12, 2)->default(0);
-            $table->decimal('total', 12, 2);
-            $table->enum('status', ['pending', 'paid', 'processing', 'shipped', 'completed', 'cancelled', 'refunded'])->default('pending');
+            $table->decimal('total', 12, 2)->default(0);
+            $table->enum('status', ['pending',  'processing', 'shipped', 'completed', 'cancelled', 'refunded'])->default('pending');
+            $table->enum('payment_status', ['unpaid', 'paid'])->default('unpaid');
             $table->timestamps();
         });
     }

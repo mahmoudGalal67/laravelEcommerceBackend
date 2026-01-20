@@ -23,7 +23,7 @@ class JwtMiddleware
         $user = User::find($decoded->sub);
         if (!$user) return response()->json(['message' => 'User not found'], 401);
 
-        $request->merge(['user' => $user]);
+       $request->setUserResolver(fn () => $user);
         return $next($request);
     }
 }

@@ -14,10 +14,12 @@ class Product extends Model
         'base_price',
         'is_active',
         'is_featured',
+        'base_images',
     ];
 
     protected $casts = [
         'base_price' => 'decimal:2',
+        'base_images' => 'array',
     ];
 
     // Relationships

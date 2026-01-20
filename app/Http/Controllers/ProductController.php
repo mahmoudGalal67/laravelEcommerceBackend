@@ -7,6 +7,10 @@ use App\Models\Product;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Validator;
+use App\Models\Variant;
+use App\Models\VariantImage;
+use Illuminate\Support\Facades\Storage;
 
 class ProductController extends Controller
 {
@@ -22,12 +26,18 @@ class ProductController extends Controller
             'variants.size'     // include size relation
         ]);
         // ✅ Name filter
-        if ($request->filled('name')) {
-            $query->where('name', 'like', '%' . $request->name . '%');
-        }
+      if ($request->filled('search')) {
+    $search = $request->search;
+
+    $query->where(function ($q) use ($search) {
+        $q->where('name', 'like', "%{$search}%")
+          ->orWhere('description', 'like', "%{$search}%");
+    });
+}
+
 
         // ✅ Category filter
-        if ($request->filled('category')) {
+        if ($request->filled('category') && $request->category != 'undefined') {
             $query->whereHas('categories', function ($q) use ($request) {
                 $q->where('name', $request->category);
             });
@@ -63,17 +73,36 @@ class ProductController extends Controller
         }
 
         // ✅ Sorting
-        if ($request->filled('sort_by')) {
-            $sortOrder = $request->get('sort_order', 'asc');
+        if ($request->filled('sort')) {
 
-            if ($request->sort_by === 'price') {
-                // compute min price between base and variants
-                $query->withMin('variants', 'price')
-                    ->select('products.*')
-                    ->selectRaw('LEAST(base_price, COALESCE((SELECT MIN(price) FROM product_variants WHERE product_variants.product_id = products.id), base_price)) as effective_price')
-                    ->orderBy('effective_price', $sortOrder);
-            } else {
-                $query->orderBy($request->sort_by, $sortOrder);
+            $sort = $request->get('sort');  // oldest, newest, price_asc, price_desc
+
+            switch ($sort) {
+
+                case 'oldest':
+                    $query->orderBy('created_at', 'asc');
+                    break;
+
+                case 'newest':
+                    $query->orderBy('created_at', 'desc');
+                    break;
+
+                case 'asc':
+                case 'desc':
+                    $direction = $sort; // asc or desc
+
+                    $query->select('products.*')
+                        ->selectRaw("
+            LEAST(
+                base_price,
+                COALESCE(
+                    (SELECT MIN(price) FROM variants WHERE variants.product_id = products.id),
+                    base_price
+                )
+            ) AS effective_price
+        ")
+                        ->orderBy('effective_price', $direction);
+                    break;
             }
         } else {
             $query->latest();
@@ -88,11 +117,12 @@ class ProductController extends Controller
      */
     public function store(Request $request)
     {
-        $validated = $request->validate([
+         $validator = Validator::make($request->all(), [
             'name' => 'required|string|max:100',
             'description' => 'nullable|string|max:50',
             'category_id' => 'nullable|numeric',
             'base_price' => 'nullable|numeric',
+            'base_images' => 'nullable|array',
             'is_active' => 'boolean',
 
             // ✅ Variants optional
@@ -104,11 +134,23 @@ class ProductController extends Controller
             'variants.*.sku' => 'nullable:variants|string|min:0',
             'variants.*.images' => 'required_with:variants|array',
         ]);
+   $validator->after(function ($validator) use ($request) {
+        $variants = $request->input('variants');
+        $baseImages = $request->file('base_images');
+
+        if (empty($variants) && empty($baseImages)) {
+            $validator->errors()->add(
+                'base_images',
+                'At least one base image is required when no variants exist'
+            );
+        }
+    });
+    $validated = $validator->validate();
 
         /**
          * @var \App\Models\User $user
          */
-        $user = $request->get('user');
+        $user = $request->user();
         $userId = $user->id;
         try {
             DB::beginTransaction();
@@ -128,19 +170,61 @@ class ProductController extends Controller
             }
             // ✅ Only create variants if they exist
             if (!empty($validated['variants'])) {
-                foreach ($validated['variants'] as $variantData) {
-                    $images = $variantData['images'] ?? [];
+               foreach ($request->variants as $vIndex => $variantData) {
 
-                    unset($variantData['images']); // prevent mass assignment error
+    $variant = Variant::updateOrCreate(
+        ['id' => $variantData['id']],
+        [
+            'product_id' => $product->id,
+            'price' => $variantData['price'],
+            'stock' => $variantData['stock'],
+            'color_id' => $variantData['color_id'],
+            'size_id' => $variantData['size_id'],
+            'sku' => $variantData['sku'] ?? null,
+        ]
+    );
 
-                    $variant = $product->variants()->create($variantData);
+    $imagesMeta = $variantData['images'] ?? [];
 
-                    foreach ($images as $img) {
-                        $path = $img->store('uploads', 'public'); // store in storage/app/public/uploads
-                        $variant->images()->create(['file_path' => $path]);
-                    }
-                }
+    foreach ($imagesMeta as $imgIndex => $imgMeta) {
+
+        if ($imgMeta['type'] === 'new') {
+
+            // 🔥 THIS IS THE IMPORTANT LINE
+            $file = $request->file("variants.$vIndex.images.$imgIndex.file");
+
+            if (!$file) {
+                continue;
             }
+
+            $path = $file->store('uploads', 'public');
+
+            VariantImage::create([
+                'variant_id' => $variant->id,
+                'file_path'  => $path,
+                'sort_order' => (int) $imgMeta['sort_order'],
+                'is_main'    => (int) $imgMeta['sort_order'] === 0,
+            ]);
+        }
+    }
+}
+
+            }
+        else {
+    if (!empty($validated['base_images'])) {
+        $images = [];
+
+        foreach ($validated['base_images'] as $img) {
+            $path = $img->store('uploads', 'public');
+            $images[] = $path;
+        }
+
+        // ✅ assign array at once
+        $product->update([
+            'base_images' => $images,
+        ]);
+    }
+}
             DB::commit();
             return response()->json($product->load('variants.images'), 201);
         } catch (\Throwable $e) {
@@ -177,17 +261,163 @@ class ProductController extends Controller
     /**
      * Update the specified resource in storage.
      */
-    public function update(Request $request, string $id)
-    {
-        //
+ public function update(Request $request, string $id)
+{
+    // 1️⃣ VALIDATION
+    $validator = Validator::make($request->all(), [
+        'name' => 'required|string|max:100',
+        'description' => 'nullable|string|max:50',
+        'category_id' => 'nullable|numeric',
+        'base_price' => 'nullable|numeric',
+        'base_images' => 'nullable|array',
+        'deleted_base_images' => 'nullable|array',
+        'is_active' => 'boolean',
+
+        // Variants
+        'variants' => 'nullable|array',
+        'variants.*.id' => 'required|numeric',
+        'variants.*.color_id' => 'required_with:variants|string|max:100',
+        'variants.*.size_id' => 'required_with:variants|string|max:50',
+        'variants.*.price' => 'required_with:variants|numeric|min:0',
+        'variants.*.stock' => 'required_with:variants|integer|min:0',
+        'variants.*.sku' => 'nullable|string|min:0',
+        'variants.*.images' => 'nullable|array',
+        'variants.*.images.*.type' => 'required|in:existing,new',
+        'variants.*.images.*.sort_order' => 'required|integer|min:0',
+        'variants.*.images.*.file_path' => 'required_if:variants.*.images.*.type,existing',
+        'variants.*.deleted_images' => 'nullable|array',
+    ]);
+
+    $validator->after(function ($validator) use ($request) {
+        $variants = $request->input('variants');
+        $newBaseImages = $request->file('base_images', []);
+        $existingBaseImages = $request->input('existing_base_images', []);
+
+        if (empty($variants) && count($newBaseImages) === 0 && count($existingBaseImages) === 0) {
+            $validator->errors()->add(
+                'base_images',
+                'At least one base image is required when no variants exist'
+            );
+        }
+    });
+
+    $validated = $validator->validate();
+
+    $product = Product::findOrFail($id);
+
+    /*
+    |----------------------------------------------------------------------
+    | BASE IMAGES HANDLING (unchanged)
+    |---------------------------------------------------------------------- 
+    */
+    $existingImages = $product->base_images ?? [];
+
+    if ($request->filled('deleted_base_images')) {
+        foreach ($request->deleted_base_images as $img) {
+            Storage::disk('public')->delete($img);
+            $existingImages = array_values(array_diff($existingImages, [$img]));
+        }
     }
+
+    if ($request->hasFile('base_images')) {
+        foreach ($request->file('base_images') as $file) {
+            $path = $file->store('uploads', 'public');
+            $existingImages[] = $path;
+        }
+    }
+
+    $validated['base_images'] = $existingImages;
+    $product->update($validated);
+
+/*
+|--------------------------------------------------------------------------
+| VARIANT IMAGES HANDLING (FIXED SORTING)
+|--------------------------------------------------------------------------
+*/
+foreach ($request->input('variants', []) as $vIndex => $variantData) {
+
+    $variant = Variant::findOrFail($variantData['id']);
+
+    /*
+    | 1️⃣ Delete removed images
+    */
+    if (!empty($variantData['deleted_images'])) {
+        foreach ($variantData['deleted_images'] as $path) {
+            Storage::disk('public')->delete($path);
+            VariantImage::where('variant_id', $variant->id)
+                ->where('file_path', $path)
+                ->delete();
+        }
+    }
+// 2️⃣ Get images metadata and uploaded files
+$imagesMeta = $variantData['images'] ?? [];
+$uploadedFiles = $request->file("variants.$vIndex.images", []);
+
+// Sort by incoming sort_order (string-safe)
+usort($imagesMeta, fn ($a, $b) =>
+    intval($a['sort_order']) <=> intval($b['sort_order'])
+);
+
+// 🔥 Always rebuild clean
+VariantImage::where('variant_id', $variant->id)->delete();
+
+$uploadIndex = 0;
+
+foreach ($imagesMeta as $index => $img) {
+
+    // Existing image
+    if ($img['type'] === 'existing') {
+        VariantImage::create([
+            'variant_id' => $variant->id,
+            'file_path'  => $img['file_path'],
+            'sort_order' => $index,            // ✅ BACKEND CONTROLS ORDER
+            'is_main'    => $index === 0,       // ✅ ONLY FIRST IMAGE
+        ]);
+    }
+
+    // New image
+    if ($img['type'] === 'new' && isset($uploadedFiles[$uploadIndex])) {
+        $path = $uploadedFiles[$uploadIndex]->store('uploads', 'public');
+
+        VariantImage::create([
+            'variant_id' => $variant->id,
+            'file_path'  => $path,
+            'sort_order' => $index,            // ✅ NORMALIZED
+            'is_main'    => $index === 0,
+        ]);
+
+        $uploadIndex++;
+    }
+}
+
+   
+}
+    return response()->json([
+        'message' => 'Product updated successfully',
+        'product' => $product->load('variants', 'variants.images')
+    ]);
+}
+
 
     /**
      * Remove the specified resource from storage.
      */
-    public function destroy(string $id)
+    public function destroy(Request $request)
     {
-        //
+        $validated = $request->validate([
+            'ids'   => 'required|array|min:1',
+            'ids.*' => 'integer|exists:products,id',
+        ]);
+
+        $products = Product::whereIn('id', $validated['ids'])->get();
+
+        foreach ($products as $product) {
+            $product->delete();
+        }
+
+        return response()->json([
+            'message' => 'Products deleted successfully',
+        ]);
     }
     // ✅ Create variant with images
     public function storeVariant(Request $request, $productId)

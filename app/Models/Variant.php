@@ -26,7 +26,8 @@ class Variant extends Model
 
     public function images()
     {
-        return $this->hasMany(VariantImage::class);
+        return $this->hasMany(VariantImage::class)
+            ->orderBy('sort_order'); // ✅ REQUIRED
     }
     public function color()
     {

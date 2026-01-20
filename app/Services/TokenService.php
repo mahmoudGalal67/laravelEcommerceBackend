@@ -7,6 +7,7 @@ use Firebase\JWT\Key;
 use Illuminate\Support\Str;
 use App\Models\RefreshToken;
 use Carbon\Carbon;
+use Illuminate\Http\Request;
 
 class TokenService
 {
@@ -44,5 +45,27 @@ class TokenService
   } catch (\Exception $e) {
    return null;
   }
+ }
+ public static function getUserFromRefreshCookie(Request $request)
+ {
+  $plain = $request->cookie('refresh_token');
+  if (!$plain) {
+   return null;
+  }
+
+  $token = RefreshToken::where(
+   'token_hash',
+   hash('sha256', $plain)
+  )->first();
+
+  if (!$token) {
+   return null;
+  }
+
+  if (now()->gt($token->expires_at)) {
+   return null;
+  }
+
+  return $token->user; // return User model
  }
 }

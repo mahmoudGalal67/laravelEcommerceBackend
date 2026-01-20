@@ -1,77 +1,145 @@
 <?php
 
+use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\CartController;
 use App\Http\Controllers\CategoryController;
+use App\Http\Controllers\CheckoutController;
 use App\Http\Controllers\ColorController;
+use App\Http\Controllers\OrderController;
 use App\Http\Controllers\ProductController;
 use App\Http\Controllers\SizeController;
-use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Route;
-
-
-// Authentacation
+use App\Http\Controllers\StripeController;
+use App\Http\Controllers\StripeWebhookController;
+use App\Http\Controllers\UserController;
+use App\Http\Controllers\Api\PageController;
+/*
+|--------------------------------------------------------------------------
+| Auth Routes
+|--------------------------------------------------------------------------
+*/
 
 Route::post('/register', [AuthController::class, 'register']);
 Route::post('/login', [AuthController::class, 'login']);
 Route::post('/refresh', [AuthController::class, 'refresh']);
 Route::post('/logout', [AuthController::class, 'logout']);
 
-// Public
-// Route::get('products/{product}', [ProductController::class, 'show']);
 
-// // Auth (client/seller/admin)
-// Route::post('auth/register', [AuthController::class, 'register']);
-// Route::post('auth/login', [AuthController::class, 'login']);
-
-// // Protected - any authenticated user
-// Route::middleware('auth:sanctum')->group(function () {
-//     Route::get('user', [AuthController::class, 'me']);
-//     Route::post('logout', [AuthController::class, 'logout']);
-//     // Cart & checkout
-//     Route::get('cart', [CartController::class, 'getCart']);
-//     Route::post('cart/add', [CartController::class, 'addItem']);
-//     Route::post('checkout', [CheckoutController::class, 'startCheckout']);
-//     Route::post('payment/initiate', [PaymentController::class, 'initiatePayment']);
-// });
-
-// // Seller-only
-// Route::middleware(['auth:sanctum', 'role:seller'])->prefix('seller')->group(function () {
-//     Route::apiResource('products', ProductController::class)->except(['index', 'show']);
-//     Route::apiResource('products.variants', VariantController::class)->shallow();
-//     Route::get('orders', [SellerOrderController::class, 'index']);
-//     Route::post('products/{product}/images', [ProductImageController::class, 'store']);
-// });
+/*
+|--------------------------------------------------------------------------
+| Public Data (No Auth)
+|--------------------------------------------------------------------------
+*/
 
 Route::apiResource('colors', ColorController::class)->only(['index']);
 Route::apiResource('sizes', SizeController::class)->only(['index']);
 Route::apiResource('categories', CategoryController::class)->only(['index']);
 Route::apiResource('products', ProductController::class)->only(['index', 'show']);
-// // Admin-only
+
+
+/*
+|--------------------------------------------------------------------------
+| Protected Routes (Token Required)
+|--------------------------------------------------------------------------
+*/
+
 Route::middleware('auth.jwt')->group(function () {
+
+ // Authenticated user info
  Route::get('/user', [AuthController::class, 'me']);
- // Route::get('dashboard', [Admin\DashboardController::class, 'index']);
- // Route::resource('categories', CategoryController::class);
- // Route::get('orders', [Admin\OrderController::class, 'index']);
- // Route::post('sellers/{seller}/approve', [Admin\SellerController::class, 'approve']);
+
+ // Admin / CRUD except index
  Route::apiResource('colors', ColorController::class)->except(['index']);
  Route::apiResource('sizes', SizeController::class)->except(['index']);
  Route::apiResource('categories', CategoryController::class)->except(['index']);
+ Route::delete('products', [ProductController::class,'destroy']);
  Route::apiResource('products', ProductController::class)->except(['index', 'show']);
-});
-Route::middleware(['auth:sanctum', 'role:admin'])->prefix('admin')->group(function () {
- // Route::get('dashboard', [Admin\DashboardController::class, 'index']);
- // Route::resource('categories', CategoryController::class);
- // Route::get('orders', [Admin\OrderController::class, 'index']);
- // Route::post('sellers/{seller}/approve', [Admin\SellerController::class, 'approve']);
+
+ // Cart merge (when user logs in)
+ Route::post('/cart/merge', [CartController::class, 'merge']);
 });
 
-Route::post('/cart/guest', [CartController::class, 'storeGuest']);
-Route::delete('/cart/guest/{id}', [CartController::class, 'destroyGuest']);
+
+/*
+|--------------------------------------------------------------------------
+| Cart Routes (Guest + Auth)
+|--------------------------------------------------------------------------
+*/
+
 Route::get('/cart', [CartController::class, 'index']);
-Route::middleware('auth.jwt')->group(function () {
- Route::post('/cart', [CartController::class, 'store']);
- Route::delete('/cart/clear', [CartController::class, 'clear']);
- Route::delete('/cart/{id}', [CartController::class, 'destroy']);
- Route::post('/cart/sync', [CartController::class, 'syncGuestCart']);
+Route::post('/cart', [CartController::class, 'store']);
+Route::delete('/cart/{id}', [CartController::class, 'destroy']);
+Route::delete('/cart/clear', [CartController::class, 'clear']);
+
+
+/*
+|--------------------------------------------------------------------------
+| Checkout Routes ( Auth)
+|--------------------------------------------------------------------------
+*/
+Route::middleware('auth.jwt')->group(
+ function () {
+  Route::post('/checkout', [CheckoutController::class, 'checkout']);
+ }
+);
+/*
+
+
+/*
+|--------------------------------------------------------------------------
+| Orders Routes ( Auth)
+|--------------------------------------------------------------------------
+*/
+Route::post('/stripe/webhook', [StripeWebhookController::class, 'handle']);
+Route::middleware('auth.jwt')->group(
+ function () {
+  Route::get('/orders/client', [OrderController::class, 'clientIndex']);
+  Route::get('/orders/client/{id}', [CheckoutController::class, 'show']);
+  Route::put('/orders/client/{id}', [CheckoutController::class, 'update']);
+  Route::delete('/orders/client/{id}', [CheckoutController::class, 'destroy']);
+
+  Route::post('/stripe/payment-intent', [StripeController::class, 'createPaymentIntent']);
+ }
+);
+/*
+
+
+|--------------------------------------------------------------------------
+| Admin Panel Routes (Sanctum + Role)
+|--------------------------------------------------------------------------
+*/
+
+
+ Route::middleware(['auth.jwt', 'role:admin'])->group(function () {
+Route::prefix('pages')->group(function () {
+    Route::get('/', [PageController::class, 'index']);
+    Route::get('{slug}', [PageController::class, 'show']);
+    Route::post('/', [PageController::class, 'store']);
+    Route::put('{slug}', [PageController::class, 'update']);
+    Route::delete('{slug}', [PageController::class, 'destroy']);
+});
+});
+
+/*
+|--------------------------------------------------------------------------
+| Admin and Sellers Panel Routes (Sanctum + Role)
+|--------------------------------------------------------------------------
+*/
+
+
+ Route::middleware(['auth.jwt', 'role:seller'])->group(function () {
+Route::prefix('orders')->group(function () {
+     Route::get('/seller', [OrderController::class, 'sellerIndex']);
+     Route::get('/{id}', [OrderController::class, 'show']);
+     Route::post('/update-status/{id}', [OrderController::class, 'updateStatus']);
+     Route::post('/cancel', [OrderController::class, 'cancelOrders']);
+     Route::post('/cancel-seller', [OrderController::class, 'cancelSellerOrders']);
+    });
+});
+
+
+// Users Manages
+Route::middleware(['auth.jwt', 'role:admin'])->group(function () {
+    Route::apiResource('users', UserController::class);
+    Route::delete('users', [UserController::class,'destroy']);
 });

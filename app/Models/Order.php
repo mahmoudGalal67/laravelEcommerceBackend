@@ -8,7 +8,13 @@ class Order extends Model
 {
     protected $fillable = [
         'user_id',
-        'total_amount',
+        'payment_intent_id',
+        'name',
+        'email',
+        'phone',
+        'adress',
+        'city',
+        'subtotal',
         'status',
         'payment_status',
     ];
@@ -27,7 +33,10 @@ class Order extends Model
     {
         return $this->hasMany(OrderItem::class);
     }
-
+    public function sellerOrders()
+    {
+        return $this->hasMany(SellerOrder::class);
+    }
     public function payment()
     {
         return $this->hasOne(Payment::class);

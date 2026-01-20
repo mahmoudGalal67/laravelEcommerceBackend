@@ -47,18 +47,19 @@ class AuthController extends Controller
         $cookie = cookie(
             'refresh_token',
             $refresh['plain'],
-            env('REFRESH_TTL', 1209600) / 60, // minutes
-            '/',                               // path
-            null,                              // domain
-            false,                             // secure (false for local HTTP)
-            true,                              // httpOnly
-            false,                             // raw
-            'lax'                              // sameSite
+            env('REFRESH_TTL', 1209600) / 60,
+            '/',
+            null,   // ← IMPORTANT
+            false,
+            true,
+            false,
+            'lax'
         );
 
 
 
-        return response()->json(['refresh_token' =>  $cookie, 'userInfo' => $user])->withCookie($cookie);
+
+        return response()->json(['access_token' =>   $access, 'userInfo' => $user])->withCookie($cookie);
     }
     public function refresh(Request $request)
     {
@@ -82,11 +83,28 @@ class AuthController extends Controller
             RefreshToken::where('token_hash', hash('sha256', $plain))->delete();
         }
 
-        return response()->json(['message' => 'Logged out'])->withCookie(Cookie::forget('refresh_token'));
+        // force delete the cookie
+        $expiredCookie = cookie(
+            'refresh_token',
+            null,
+            -1,
+            '/',
+            null,   // ← MUST MATCH LOGIN
+            false,
+            true,
+            false,
+            'lax'
+        );
+
+
+        return response()
+            ->json(['message' => 'Logged out'])
+            ->withCookie($expiredCookie);
     }
+
 
     public function me(Request $request)
     {
-        return response()->json($request->get('user'));
+        return response()->json($request->user());
     }
 }
