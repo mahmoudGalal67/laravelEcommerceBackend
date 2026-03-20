@@ -1,5 +1,7 @@
 <?php
 
+use App\Http\Controllers\ImageController;
+use App\Http\Controllers\SettingController;
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\CartController;
@@ -45,18 +47,18 @@ Route::apiResource('products', ProductController::class)->only(['index', 'show']
 
 Route::middleware('auth.jwt')->group(function () {
 
- // Authenticated user info
- Route::get('/user', [AuthController::class, 'me']);
+    // Authenticated user info
+    Route::get('/user', [AuthController::class, 'me']);
 
- // Admin / CRUD except index
- Route::apiResource('colors', ColorController::class)->except(['index']);
- Route::apiResource('sizes', SizeController::class)->except(['index']);
- Route::apiResource('categories', CategoryController::class)->except(['index']);
- Route::delete('products', [ProductController::class,'destroy']);
- Route::apiResource('products', ProductController::class)->except(['index', 'show']);
+    // Admin / CRUD except index
+    Route::apiResource('colors', ColorController::class)->except(['index']);
+    Route::apiResource('sizes', SizeController::class)->except(['index']);
+    Route::apiResource('categories', CategoryController::class)->except(['index']);
+    Route::delete('products', [ProductController::class, 'destroy']);
+    Route::apiResource('products', ProductController::class)->except(['index', 'show']);
 
- // Cart merge (when user logs in)
- Route::post('/cart/merge', [CartController::class, 'merge']);
+    // Cart merge (when user logs in)
+    Route::post('/cart/merge', [CartController::class, 'merge']);
 });
 
 
@@ -78,9 +80,9 @@ Route::delete('/cart/clear', [CartController::class, 'clear']);
 |--------------------------------------------------------------------------
 */
 Route::middleware('auth.jwt')->group(
- function () {
-  Route::post('/checkout', [CheckoutController::class, 'checkout']);
- }
+    function () {
+        Route::post('/checkout', [CheckoutController::class, 'checkout']);
+    }
 );
 /*
 
@@ -92,14 +94,14 @@ Route::middleware('auth.jwt')->group(
 */
 Route::post('/stripe/webhook', [StripeWebhookController::class, 'handle']);
 Route::middleware('auth.jwt')->group(
- function () {
-  Route::get('/orders/client', [OrderController::class, 'clientIndex']);
-  Route::get('/orders/client/{id}', [CheckoutController::class, 'show']);
-  Route::put('/orders/client/{id}', [CheckoutController::class, 'update']);
-  Route::delete('/orders/client/{id}', [CheckoutController::class, 'destroy']);
+    function () {
+        Route::get('/orders/client', [OrderController::class, 'clientIndex']);
+        Route::get('/orders/client/{id}', [CheckoutController::class, 'show']);
+        Route::put('/orders/client/{id}', [CheckoutController::class, 'update']);
+        Route::delete('/orders/client/{id}', [CheckoutController::class, 'destroy']);
 
-  Route::post('/stripe/payment-intent', [StripeController::class, 'createPaymentIntent']);
- }
+        Route::post('/stripe/payment-intent', [StripeController::class, 'createPaymentIntent']);
+    }
 );
 /*
 
@@ -110,14 +112,14 @@ Route::middleware('auth.jwt')->group(
 */
 
 
- Route::middleware(['auth.jwt', 'role:admin'])->group(function () {
-Route::prefix('pages')->group(function () {
-    Route::get('/', [PageController::class, 'index']);
-    Route::get('{slug}', [PageController::class, 'show']);
-    Route::post('/', [PageController::class, 'store']);
-    Route::put('{slug}', [PageController::class, 'update']);
-    Route::delete('{slug}', [PageController::class, 'destroy']);
-});
+Route::middleware(['auth.jwt', 'role:admin'])->group(function () {
+    Route::prefix('pages')->group(function () {
+        Route::get('/', [PageController::class, 'index']);
+        Route::get('{slug}', [PageController::class, 'show']);
+        Route::post('/', [PageController::class, 'store']);
+        Route::put('{slug}', [PageController::class, 'update']);
+        Route::delete('{slug}', [PageController::class, 'destroy']);
+    });
 });
 
 /*
@@ -127,13 +129,13 @@ Route::prefix('pages')->group(function () {
 */
 
 
- Route::middleware(['auth.jwt', 'role:seller'])->group(function () {
-Route::prefix('orders')->group(function () {
-     Route::get('/seller', [OrderController::class, 'sellerIndex']);
-     Route::get('/{id}', [OrderController::class, 'show']);
-     Route::post('/update-status/{id}', [OrderController::class, 'updateStatus']);
-     Route::post('/cancel', [OrderController::class, 'cancelOrders']);
-     Route::post('/cancel-seller', [OrderController::class, 'cancelSellerOrders']);
+Route::middleware(['auth.jwt', 'role:seller'])->group(function () {
+    Route::prefix('orders')->group(function () {
+        Route::get('/seller', [OrderController::class, 'sellerIndex']);
+        Route::get('/{id}', [OrderController::class, 'show']);
+        Route::post('/update-status/{id}', [OrderController::class, 'updateStatus']);
+        Route::post('/cancel', [OrderController::class, 'cancelOrders']);
+        Route::post('/cancel-seller', [OrderController::class, 'cancelSellerOrders']);
     });
 });
 
@@ -141,5 +143,16 @@ Route::prefix('orders')->group(function () {
 // Users Manages
 Route::middleware(['auth.jwt', 'role:admin'])->group(function () {
     Route::apiResource('users', UserController::class);
-    Route::delete('users', [UserController::class,'destroy']);
+    Route::delete('users', [UserController::class, 'destroy']);
+});
+
+Route::middleware(['auth.jwt', 'role:admin'])->group(function () {
+    Route::get('/settings', [SettingController::class, 'show']);
+    Route::post('/settings', [SettingController::class, 'update']);
+    // HandelImageUpload
+    Route::post('/upload-image', [ImageController::class, 'upload']);
+    Route::post('/delete-image', [ImageController::class, 'delete']);
+    Route::get('/products/all/names', [ProductController::class, 'getAllProductsName']);
+    Route::get('/products/all/filterByNames', [ProductController::class, 'filterByNames']);
+    Route::post('/products/byCategories', [ProductController::class, 'byCategories']);
 });
